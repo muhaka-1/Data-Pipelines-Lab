@@ -1,0 +1,60 @@
+services:
+  db:
+    image: postgres:16
+    container_name: jensen-pipeline-db
+    environment:
+      POSTGRES_USER: student
+      POSTGRES_PASSWORD: student
+      POSTGRES_DB: datapipeline
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U student -d datapipeline"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./api
+    container_name: jensen-pipeline-api
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: datapipeline
+      DB_USER: student
+      DB_PASSWORD: student
+    ports:
+      - "5002:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./api:/app
+
+  pipeline:
+    build: ./pipeline
+    container_name: jensen-pipeline-worker
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: datapipeline
+      DB_USER: student
+      DB_PASSWORD: student
+      POLL_INTERVAL_SECONDS: 5
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./pipeline:/app
+
+  simulator:
+    build: ./simulator
+    container_name: jensen-pipeline-simulator
+    environment:
+      API_BASE_URL: http://api:5000
+    depends_on:
+      - api
+    volumes:
+      - ./simulator:/app
