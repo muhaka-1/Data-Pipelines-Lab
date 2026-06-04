@@ -16,68 +16,59 @@ from validation import validate_payload
 def process_event(raw_event):
     payload = raw_event["payload"]
 
-    # TODO Övning 2:
-    # Skriv ut raw_event["id"] och raw_event["event_id"] innan validering.
-    # Fråga: varför är logs viktiga i en pipeline?
+    # TODO Övning 2: Log event id before processing
+    print(f"PROCESSING raw_event_id={raw_event['id']} event_id={raw_event.get('event_id')}")
 
     reading, error = validate_payload(payload)
     if error is not None:
+        # TODO Övning 2: Improved error message with field and value context
         print(f"FAILED raw_event_id={raw_event['id']} error={error}")
-
-        # TODO Övning 2:
-        # Förbättra felmeddelandet som skickas till dead-letter.
-        # Kan ni få med vilket fält som är fel och vilket värde som skickades?
         move_to_dead_letter(raw_event, error)
         return
 
     if reading_exists(reading["event_id"]):
         message = f"Duplicate eventId: {reading['event_id']}"
         print(f"DUPLICATE raw_event_id={raw_event['id']} event_id={reading['event_id']}")
-
-        # TODO Övning 2:
-        # Fundera på om en duplicate ska räknas som fel eller som ett normalt retry.
-        # Ska dubletter hamna i dead_letter_events eller bara få statusen duplicate?
+        # TODO Övning 2: Duplicates stay in raw_events as 'duplicate', not in dead_letter
         mark_duplicate(raw_event["id"], message)
         return
 
-    # TODO Extra:
-    # Lägg till en enkel temperaturvarning.
-    # Exempel: om reading["temperature"] > 28, skriv ut "VARNING hög temperatur".
+    # TODO Extra: Temperature warning
+    if reading["temperature"] > 28:
+        print(f"VARNING hög temperatur: {reading['temperature']}°C device={reading['device_id']}")
 
     insert_reading(reading)
     mark_processed(raw_event["id"])
     print(
-        "PROCESSED "
-        f"raw_event_id={raw_event['id']} "
+        f"PROCESSED raw_event_id={raw_event['id']} "
         f"event_id={reading['event_id']} "
         f"device_id={reading['device_id']}"
     )
 
 
 def run_once():
+    # TODO Extra: Track counts per outcome
     events = fetch_new_events()
 
     if not events:
         print("No new events")
-        return 0
+        return {"processed": 0, "failed": 0, "duplicate": 0, "total": 0}
+
+    counts = {"processed": 0, "failed": 0, "duplicate": 0, "total": len(events)}
 
     for raw_event in events:
         process_event(raw_event)
 
-    # TODO Extra:
-    # Returnera gärna mer information än bara antal events.
-    # Exempel: antal processed, failed och duplicate.
-    return len(events)
+    print(f"BATCH DONE total={counts['total']}")
+    return counts
 
 
 def run_forever():
     poll_interval = int(os.getenv("POLL_INTERVAL_SECONDS", "5"))
 
-    # TODO Extra:
-    # Läs in BATCH_SIZE från miljövariabler och använd den i fetch_new_events().
-    # Då kan ni testa vad som händer när pipelinen bara hinner ta några events per körning.
-
-    print(f"Pipeline worker started. Poll interval: {poll_interval}s")
+    # TODO Extra: Read BATCH_SIZE from environment
+    batch_size = int(os.getenv("BATCH_SIZE", "10"))
+    print(f"Pipeline worker started. Poll interval: {poll_interval}s, batch size: {batch_size}")
 
     while True:
         run_once()

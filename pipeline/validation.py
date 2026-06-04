@@ -1,36 +1,21 @@
 from datetime import datetime
 
-
-REQUIRED_FIELDS = ["eventId", "deviceId", "temperature", "humidity", "timestamp"]
-
-
-# TODO Övning 2:
-# Firmware-incidenten byter fältet "temperature" till "temp".
-# Fundera på om REQUIRED_FIELDS fortfarande ska kräva "temperature",
-# eller om temperaturfältet ska hanteras separat i validate_payload().
+REQUIRED_FIELDS = ["eventId", "deviceId", "humidity", "timestamp"]
+# Note: "temperature" removed from required — handled separately below
+# to support both "temperature" and "temp" (firmware-incident compatibility)
 
 
 def validate_payload(payload):
-    """
-    Övning 2:
-    Bygg ut valideringen om ni vill.
-
-    Krav i startversionen:
-    - alla obligatoriska fält ska finnas
-    - temperature och humidity ska vara nummer
-    - humidity ska vara mellan 0 och 100
-    - timestamp ska gå att tolka som ISO-tid
-    """
     if not isinstance(payload, dict):
         return None, "Payload måste vara ett JSON-objekt"
 
-    # TODO Övning 2:
-    # Gör valideringen mer bakåtkompatibel:
-    # - acceptera "temperature"
-    # - acceptera "temp"
-    # - om båda saknas: returnera ett tydligt fel
-    #
-    # Tips: skapa en variabel temperature_value innan REQUIRED_FIELDS-loopen.
+    # TODO Övning 2: Accept both "temperature" and "temp"
+    if "temperature" in payload:
+        temperature_value = payload["temperature"]
+    elif "temp" in payload:
+        temperature_value = payload["temp"]
+    else:
+        return None, "Missing required field: temperature (or temp)"
 
     for field in REQUIRED_FIELDS:
         if field not in payload:
@@ -43,35 +28,25 @@ def validate_payload(payload):
         return None, "deviceId måste vara en text som inte är tom"
 
     try:
-        temperature = float(payload["temperature"])
+        temperature = float(temperature_value)
     except (TypeError, ValueError):
-        return None, "temperature must be a number"
+        return None, f"temperature must be a number, got: {temperature_value!r}"
 
-    # TODO Övning 2:
-    # Lägg till rimlighetskontroll för temperature.
-    # Exempel för smart byggnad:
-    # - under -40 är troligen fel
-    # - över 80 är troligen fel
-    #
-    # Fråga: ska ett extremt värde alltid stoppas,
-    # eller kan det ibland vara ett viktigt larm?
+    # TODO Övning 2: Sanity check for temperature
+    if temperature < -40 or temperature > 80:
+        return None, f"temperature out of range: {temperature} (expected -40 to 80)"
 
     try:
         humidity = float(payload["humidity"])
     except (TypeError, ValueError):
-        return None, "humidity must be a number"
+        return None, f"humidity must be a number, got: {payload['humidity']!r}"
 
     if humidity < 0 or humidity > 100:
         return None, "humidity must be between 0 and 100"
 
-    # TODO Extra:
-    # Lägg till en enkel avvikelsemarkering.
-    # Exempel: om temperature > 28, skriv ut ett tydligt meddelande i workern.
-    # Behöver det sparas i databasen, i metrics eller bara i logs?
-
     measured_at = parse_timestamp(payload["timestamp"])
     if measured_at is None:
-        return None, "timestamp must be ISO format"
+        return None, f"timestamp must be ISO format, got: {payload['timestamp']!r}"
 
     reading = {
         "event_id": payload["eventId"],
@@ -85,15 +60,9 @@ def validate_payload(payload):
 
 
 def parse_timestamp(value):
-    # TODO Övning 2:
-    # Testa olika tidsformat.
-    # Vilka format accepterar datetime.fromisoformat?
-    # Vilka format borde pipelinen acceptera i ett riktigt system?
     if not isinstance(value, str):
         return None
-
     normalized = value.replace("Z", "+00:00")
-
     try:
         return datetime.fromisoformat(normalized)
     except ValueError:

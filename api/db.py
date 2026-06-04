@@ -36,15 +36,6 @@ def _convert_row(row):
 
 
 def insert_raw_event(payload):
-    """
-    TODO Övning 1:
-    Spara hela inkommande JSON-payloaden i raw_events.
-
-    Tips:
-    - event_id kan hämtas från payload.get("eventId")
-    - payload ska sparas som JSON med psycopg2.extras.Json(payload)
-    - returnera raden som skapades
-    """
     query = """
         INSERT INTO raw_events (event_id, payload)
         VALUES (%s, %s)
@@ -62,12 +53,9 @@ def insert_raw_event(payload):
 
 
 def list_raw_events(limit=20):
-    # Extra Övning 1:
-    # Säkerställ att limit alltid är ett rimligt heltal.
-    # Exempel: min 1, max 100.
+    # Extra Övning 1: clamp limit between 1 and 100
     if limit is None:
         limit = 20
-
     limit = max(1, min(int(limit), 100))
 
     query = """
@@ -86,22 +74,14 @@ def list_raw_events(limit=20):
 
 
 def get_metrics():
-    """
-    TODO Övning 2:
-    Bygg ut metrics stegvis.
-
-    Förslag:
-    1. Lägg till senaste mottagna event: MAX(received_at)
-    2. Lägg till senaste processade event: MAX(processed_at)
-    3. Lägg till antal events per device från payload->>'deviceId'
-    4. Lägg till andel failed events i procent
-    """
     query = """
         SELECT
-          COUNT(*) FILTER (WHERE status = 'new') AS new_events,
-          COUNT(*) FILTER (WHERE status = 'processed') AS processed_events,
-          COUNT(*) FILTER (WHERE status = 'failed') AS failed_events,
-          COUNT(*) FILTER (WHERE status = 'duplicate') AS duplicate_events
+          COUNT(*) FILTER (WHERE status = 'new')        AS new_events,
+          COUNT(*) FILTER (WHERE status = 'processed')  AS processed_events,
+          COUNT(*) FILTER (WHERE status = 'failed')     AS failed_events,
+          COUNT(*) FILTER (WHERE status = 'duplicate')  AS duplicate_events,
+          MAX(received_at)                               AS latest_received_at,
+          MAX(processed_at)                              AS latest_processed_at
         FROM raw_events;
     """
 
@@ -110,26 +90,37 @@ def get_metrics():
             cur.execute(query)
             raw_metrics = dict(cur.fetchone())
 
+            # Convert timestamps to ISO strings
+            for field in ["latest_received_at", "latest_processed_at"]:
+                if raw_metrics.get(field) is not None:
+                    raw_metrics[field] = raw_metrics[field].isoformat()
+
             cur.execute("SELECT COUNT(*) AS readings FROM readings;")
             readings = dict(cur.fetchone())
 
             cur.execute("SELECT COUNT(*) AS dead_letters FROM dead_letter_events;")
             dead_letters = dict(cur.fetchone())
 
-            # TODO Övning 2:
-            # Hämta senaste mottagna tid och senaste bearbetade tid.
-            #
-            # Tips SQL:
-            # SELECT MAX(received_at) AS latest_received_at FROM raw_events;
-            # SELECT MAX(processed_at) AS latest_processed_at FROM raw_events;
+            # TODO Övning 2: events per device
+            cur.execute("""
+                SELECT payload->>'deviceId' AS device_id, COUNT(*) AS events
+                FROM raw_events
+                GROUP BY device_id
+                ORDER BY events DESC;
+            """)
+            events_per_device = [
+                {"device_id": row["device_id"], "events": row["events"]}
+                for row in cur.fetchall()
+            ]
 
-            # TODO Övning 2:
-            # Hämta antal events per device.
-            #
-            # Tips SQL:
-            # SELECT payload->>'deviceId' AS device_id, COUNT(*) AS events
-            # FROM raw_events
-            # GROUP BY device_id
-            # ORDER BY events DESC;
+    total = raw_metrics.get("processed_events", 0) + raw_metrics.get("failed_events", 0)
+    failed = raw_metrics.get("failed_events", 0)
+    failed_pct = round((failed / total * 100), 1) if total > 0 else 0.0
 
-    return {**raw_metrics, **readings, **dead_letters}
+    return {
+        **raw_metrics,
+        **readings,
+        **dead_letters,
+        "failed_percent": failed_pct,
+        "events_per_device": events_per_device,
+    }
